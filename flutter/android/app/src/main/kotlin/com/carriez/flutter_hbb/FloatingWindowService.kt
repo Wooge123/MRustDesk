@@ -226,7 +226,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 //        floatingView.setOnTouchListener(this)
         floatingView.setOnLongClickListener {
             hideOverView()
-            layoutParams.screenBrightness=1.0f
+            layoutParams.screenBrightness=0.5f
             windowManager.updateViewLayout(floatingView, layoutParams)
             true
         }
