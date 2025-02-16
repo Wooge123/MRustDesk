@@ -123,11 +123,11 @@ class MainActivity : FlutterActivity() {
                     requestMediaProjection()
                     result.success(true)
                 }
-                "show_floatlayer" -> {
-                    val toast = Toast(this)
-                    toast.setText(R.string.myText)
-                    toast.show()
-                }
+                // "show_floatlayer" -> {
+                //     val toast = Toast(this)
+                //     toast.setText(R.string.myText)
+                //     toast.show()
+                // }
                 "start_capture" -> {
                     mainService?.let {
                         result.success(it.startCapture())
