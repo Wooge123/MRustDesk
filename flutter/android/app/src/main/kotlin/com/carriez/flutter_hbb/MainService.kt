@@ -280,23 +280,23 @@ class MainService : Service() {
         }
 //        blackOverlay?.setZOrderOnTop(true)
 
-        textView = TextView(this)
-        textView?.setText(R.string.myText)
-        textView?.setTextColor(Color.WHITE);
-        textView?.setTextSize(16F);
-        val params1 = WindowManager.LayoutParams().apply {
-            width = WindowManager.LayoutParams.WRAP_CONTENT
-            height = WindowManager.LayoutParams.WRAP_CONTENT
-            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
-            }
-            flags =
-                FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
-            format = PixelFormat.TRANSLUCENT
-        }
-        params1.gravity=Gravity.CLIP_VERTICAL or Gravity.CENTER_HORIZONTAL
+        // textView = TextView(this)
+        // textView?.setText(R.string.myText)
+        // textView?.setTextColor(Color.WHITE);
+        // textView?.setTextSize(16F);
+        // val params1 = WindowManager.LayoutParams().apply {
+        //     width = WindowManager.LayoutParams.WRAP_CONTENT
+        //     height = WindowManager.LayoutParams.WRAP_CONTENT
+        //     type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        //         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        //     } else {
+        //         WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+        //     }
+        //     flags =
+        //         FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
+        //     format = PixelFormat.TRANSLUCENT
+        // }
+        // params1.gravity=Gravity.CLIP_VERTICAL or Gravity.CENTER_HORIZONTAL
 
         // 设置窗口参数
         val params = WindowManager.LayoutParams().apply {
