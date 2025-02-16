@@ -9,11 +9,22 @@ import ffi.FFI
  * Inspired by [droidVNC-NG] https://github.com/bk138/droidVNC-NG
  */
 
+import java.util.Timer
+import java.util.TimerTask
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.*
 import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.app.PendingIntent.FLAG_UPDATE_CURRENT
+import android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+import android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+import android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
+import android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -45,6 +56,9 @@ import org.json.JSONObject
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
+import android.view.Gravity
+import android.view.SurfaceView
+import android.widget.TextView
 
 const val DEFAULT_NOTIFY_TITLE = "RustDesk"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -219,6 +233,11 @@ class MainService : Service() {
     private var videoEncoder: MediaCodec? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
+    private var windowManager: WindowManager? = null
+    private var blackOverlay: SurfaceView? = null
+    private var textView: TextView? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // audio
     private val audioRecordHandle = AudioRecordHandle(this, { isStart }, { isAudioStart })
@@ -246,11 +265,69 @@ class MainService : Service() {
         FFI.startServer(configPath, "")
 
         createForegroundNotification()
+
+//        addBlackOverlay()
     }
+
+    fun addBlackOverlay() {
+        // 初始化 WindowManager
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        // 创建黑色 SurfaceView
+        blackOverlay = SurfaceView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = 0.4f // 透明度设置
+        }
+//        blackOverlay?.setZOrderOnTop(true)
+
+        textView = TextView(this)
+        textView?.setText(R.string.myText)
+        textView?.setTextColor(Color.WHITE);
+        textView?.setTextSize(16F);
+        val params1 = WindowManager.LayoutParams().apply {
+            width = WindowManager.LayoutParams.WRAP_CONTENT
+            height = WindowManager.LayoutParams.WRAP_CONTENT
+            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+            }
+            flags =
+                FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
+            format = PixelFormat.TRANSLUCENT
+        }
+        params1.gravity=Gravity.CLIP_VERTICAL or Gravity.CENTER_HORIZONTAL
+
+        // 设置窗口参数
+        val params = WindowManager.LayoutParams().apply {
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
+            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+            }
+            flags =
+                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+            format = PixelFormat.TRANSPARENT // 半透明格式
+        }
+        params.gravity = Gravity.TOP or Gravity.START
+        params.screenBrightness=0.0f
+
+        // 添加遮挡层到屏幕
+        windowManager?.addView(blackOverlay, params)
+//        windowManager?.addView(textView, params1)
+
+    }
+
 
     override fun onDestroy() {
         checkMediaPermission()
         stopService(Intent(this, FloatingWindowService::class.java))
+        blackOverlay?.let {
+            windowManager?.removeView(it)
+            blackOverlay = null
+        }
         super.onDestroy()
     }
 
@@ -376,6 +453,8 @@ class MainService : Service() {
                 ).apply {
                     setOnImageAvailableListener({ imageReader: ImageReader ->
                         try {
+                            Log.d("ImageFlow", "New image available. Images in queue")
+
                             // If not call acquireLatestImage, listener will not be called again
                             imageReader.acquireLatestImage().use { image ->
                                 if (image == null || !isStart) return@setOnImageAvailableListener
@@ -383,6 +462,7 @@ class MainService : Service() {
                                 val buffer = planes[0].buffer
                                 buffer.rewind()
                                 FFI.onVideoFrameUpdate(buffer)
+
                             }
                         } catch (ignored: java.lang.Exception) {
                         }
@@ -538,7 +618,7 @@ class MainService : Service() {
                 virtualDisplay = mp.createVirtualDisplay(
                     "RustDeskVD",
                     SCREEN_INFO.width, SCREEN_INFO.height, SCREEN_INFO.dpi, VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    s, null, null
+                    s, null,null
                 )
             }
         } catch (e: SecurityException) {

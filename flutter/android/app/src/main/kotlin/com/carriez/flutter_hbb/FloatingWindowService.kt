@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.app.AlertDialog
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -28,6 +29,15 @@ import android.widget.PopupMenu
 import com.caverock.androidsvg.SVG
 import ffi.FFI
 import kotlin.math.abs
+import android.graphics.Color
+import android.view.SurfaceView
+import android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+import android.widget.TextView
+
 
 class FloatingWindowService : Service(), View.OnTouchListener {
 
@@ -37,12 +47,17 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     private lateinit var originalDrawable: Drawable
     private lateinit var leftHalfDrawable: Drawable
     private lateinit var rightHalfDrawable: Drawable
+    private var float_flag = true
+    private var firstBlack = true
 
     private var dragging = false
     private var lastDownX = 0f
     private var lastDownY = 0f
     private var viewCreated = false;
     private var keepScreenOn = KeepScreenOn.DURING_CONTROLLED
+
+    private var blackOverlay: SurfaceView? = null
+    private var textView: TextView? = null
 
     companion object {
         private val logTag = "floatingService"
@@ -61,6 +76,57 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
     override fun onBind(intent: Intent): IBinder? {
         return null
+    }
+
+    fun addBlackOverlay(onTop: Boolean, myAlpha: Float) {
+        hideOverView()
+        // 创建黑色 SurfaceView
+        blackOverlay = SurfaceView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = myAlpha
+        }
+
+        if (onTop) blackOverlay?.setZOrderOnTop(onTop)
+
+//        textView = TextView(this)
+//        textView?.setText(R.string.myText)
+//        textView?.setTextColor(Color.WHITE);
+//        textView?.setTextSize(16F);
+//        val params1 = WindowManager.LayoutParams().apply {
+//            width = WindowManager.LayoutParams.WRAP_CONTENT
+//            height = WindowManager.LayoutParams.WRAP_CONTENT
+//            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+//                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+//            } else {
+//                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+//            }
+//            flags =
+//                FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
+//            format = PixelFormat.TRANSLUCENT
+//        }
+//        params1.gravity=Gravity.CLIP_VERTICAL or Gravity.CENTER_HORIZONTAL
+
+        // 设置窗口参数
+        val params = WindowManager.LayoutParams().apply {
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
+            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+            }
+            flags =
+                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+            format = PixelFormat.TRANSPARENT // 半透明格式
+        }
+        params.gravity = Gravity.TOP or Gravity.START
+        params.screenBrightness=0.0f
+
+        // 添加遮挡层到屏幕
+        windowManager.addView(blackOverlay, params)
+
+//        windowManager?.addView(textView, params1)
+
     }
 
     override fun onCreate() {
@@ -86,6 +152,18 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             windowManager.removeView(floatingView)
         }
         handler.removeCallbacks(runnable)
+    }
+
+    private fun blackScreen() {
+        if (float_flag) {
+            addBlackOverlay(false, 0.5f)
+            float_flag = false
+        } else {
+            addBlackOverlay(true, 0.8f)
+            float_flag = true
+        }
+        layoutParams.screenBrightness=0.0f
+        windowManager.updateViewLayout(floatingView, layoutParams)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -145,7 +223,16 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         rightHalfDrawable = BitmapDrawable(resources, rightHalfBitmap)
 
         floatingView.setImageDrawable(rightHalfDrawable)
-        floatingView.setOnTouchListener(this)
+//        floatingView.setOnTouchListener(this)
+        floatingView.setOnLongClickListener {
+            hideOverView()
+            layoutParams.screenBrightness=1.0f
+            windowManager.updateViewLayout(floatingView, layoutParams)
+            true
+        }
+        floatingView.setOnClickListener {
+            blackScreen()
+        }
         floatingView.alpha = viewTransparency * 1f
 
         var flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL or FLAG_NOT_FOCUSABLE
@@ -222,10 +309,8 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         lastOrientation = resources.configuration.orientation
     }
 
-
-
     private fun performClick() {
-        showPopupMenu()
+
     }
 
     override fun onTouch(view: View?, event: MotionEvent?): Boolean {
@@ -301,19 +386,21 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     }
 
      private fun showPopupMenu() {
+         hideOverView()
          val popupMenu = PopupMenu(this, floatingView)
          val idShowRustDesk = 0
-         popupMenu.menu.add(0, idShowRustDesk, 0, translate("Show RustDesk"))
+         popupMenu.menu.add(0, idShowRustDesk, 0, "mode1")
          val idStopService = 1
-         popupMenu.menu.add(0, idStopService, 0, translate("Stop service"))
+         popupMenu.menu.add(0, idStopService, 0, "mode2")
          popupMenu.setOnMenuItemClickListener { menuItem ->
              when (menuItem.itemId) {
                  idShowRustDesk -> {
-                     openMainActivity()
+//                     openMainActivity()
                      true
                  }
                  idStopService -> {
-                     stopMainService()
+//                     hideOverView()
+//                     stopMainService()
                      true
                  }
                  else -> false
@@ -325,6 +412,12 @@ class FloatingWindowService : Service(), View.OnTouchListener {
          popupMenu.show()
      }
 
+    private fun hideOverView() {
+        blackOverlay?.let {
+            windowManager?.removeView(it)
+            blackOverlay = null
+        }
+    }
 
     private fun openMainActivity() {
         val intent = Intent(this, MainActivity::class.java)

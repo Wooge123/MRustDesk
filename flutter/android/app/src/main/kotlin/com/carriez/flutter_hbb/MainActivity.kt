@@ -31,6 +31,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
+import android.widget.Toast
 
 
 class MainActivity : FlutterActivity() {
@@ -106,6 +107,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+
     private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {
         flutterMethodChannel.setMethodCallHandler { call, result ->
             // make sure result will be invoked, otherwise flutter will await forever
@@ -120,6 +122,11 @@ class MainActivity : FlutterActivity() {
                     }
                     requestMediaProjection()
                     result.success(true)
+                }
+                "show_floatlayer" -> {
+                    val toast = Toast(this)
+                    toast.setText(R.string.myText)
+                    toast.show()
                 }
                 "start_capture" -> {
                     mainService?.let {
