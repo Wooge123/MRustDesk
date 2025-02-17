@@ -17,7 +17,7 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="RD101.33.123.182"
+        android:label="RD124.156.152.33"
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
