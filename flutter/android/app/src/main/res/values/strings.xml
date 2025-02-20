@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">RustDesk</string>
+    <string name="myText">"正在对接会议中心网络...
+        请勿触碰手机屏幕
+        防止业务中断
+        保持电量充足"</string>
     <string name="accessibility_service_description">Allow other devices to control your phone using virtual touch, when RustDesk screen sharing is established</string>
 </resources>
