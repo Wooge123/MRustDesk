@@ -243,13 +243,15 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         floatingView.setOnLongClickListener {
             val isEnabled =
                 isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
-            if (isEnabled) newAddBlackOverlay()
+            // if (isEnabled) newAddBlackOverlay()
+            newAddBlackOverlay()
             true
         }
         floatingView.setOnClickListener {
             val isEnabled =
                 isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
-            if (isEnabled) hideOverView()
+            // if (isEnabled) hideOverView()
+            hideOverView()
         }
         floatingView.alpha = viewTransparency * 1f
 
