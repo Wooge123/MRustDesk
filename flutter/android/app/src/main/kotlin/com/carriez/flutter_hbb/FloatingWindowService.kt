@@ -3,8 +3,9 @@ package com.carriez.flutter_hbb
 import android.annotation.SuppressLint
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityManager
-
+import android.view.ViewConfiguration
 import android.app.Service
+import android.widget.Toast
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -134,7 +135,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             windowManager.updateViewLayout(floatingView, layoutParams)
             blackViewAdded = true
         }
-
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -239,20 +239,22 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         rightHalfDrawable = BitmapDrawable(resources, rightHalfBitmap)
 
         floatingView.setImageDrawable(rightHalfDrawable)
-//        floatingView.setOnTouchListener(this)
-        floatingView.setOnLongClickListener {
-            val isEnabled =
-                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
-            // if (isEnabled) newAddBlackOverlay()
-            newAddBlackOverlay()
-            true
-        }
-        floatingView.setOnClickListener {
-            val isEnabled =
-                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
-            // if (isEnabled) hideOverView()
-            hideOverView()
-        }
+        floatingView.setOnTouchListener(this)
+//        floatingView.setOnLongClickListener {
+//            val isEnabled =
+//                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
+////            if (isEnabled) newAddBlackOverlay()
+//            newAddBlackOverlay()
+//            true
+//        }
+//        floatingView.setOnClickListener {
+//            val isEnabled =
+//                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
+////            if (isEnabled) hideOverView()
+//            hideOverView()
+////            newAddBlackOverlay()
+//        }
+
         floatingView.alpha = viewTransparency * 1f
 
         var flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL or FLAG_NOT_FOCUSABLE
@@ -330,7 +332,8 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     }
 
     private fun performClick() {
-
+        showPopupMenu()
+//        hideOverView()
     }
 
     override fun onTouch(view: View?, event: MotionEvent?): Boolean {
@@ -343,10 +346,12 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
             MotionEvent.ACTION_UP -> {
                 val clickDragTolerance = 10f
+
                 if (abs(event.rawX - lastDownX) < clickDragTolerance && abs(event.rawY - lastDownY) < clickDragTolerance) {
                     performClick()
                 } else {
                     moveToScreenSide()
+                    hideOverView()
                 }
             }
 
@@ -419,11 +424,13 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             when (menuItem.itemId) {
                 idShowRustDesk -> {
 //                     openMainActivity()
+                    newAddBlackOverlay()
                     true
                 }
 
                 idStopService -> {
 //                     stopMainService()
+                    hideOverView()
                     true
                 }
 
