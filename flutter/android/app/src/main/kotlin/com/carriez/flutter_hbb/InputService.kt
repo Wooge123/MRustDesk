@@ -1,679 +1,556 @@
 package com.carriez.flutter_hbb
 
-/**
- * Handle remote input and dispatch android gesture
- *
- * Inspired by [droidVNC-NG] https://github.com/bk138/droidVNC-NG
- */
-
-import android.accessibilityservice.GestureDescription
-import android.graphics.Path
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import android.widget.EditText
-import android.view.ViewGroup.LayoutParams
-import android.view.accessibility.AccessibilityNodeInfo
-import android.view.KeyEvent as KeyEventAndroid
-import android.graphics.Rect
-import android.media.AudioManager
-import android.accessibilityservice.AccessibilityServiceInfo
-import android.accessibilityservice.AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR
-import android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-import android.view.inputmethod.EditorInfo
-import androidx.annotation.RequiresApi
-import java.util.*
-import java.lang.Character
-import kotlin.math.abs
-import kotlin.math.max
-import hbb.MessageOuterClass.KeyEvent
-import hbb.MessageOuterClass.KeyboardMode
-import hbb.KeyEventConverter
-import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
+import android.view.ViewConfiguration
+import android.app.Service
+import android.widget.Toast
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.view.LayoutInflater
+import android.app.PendingIntent
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.PixelFormat
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.util.Log
+import android.view.Gravity
+import android.app.AlertDialog
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.view.accessibility.AccessibilityEvent
+import android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+import android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+import android.widget.ImageView
+import android.widget.PopupMenu
+import com.caverock.androidsvg.SVG
+import ffi.FFI
+import kotlin.math.abs
+import android.graphics.Color
+import android.view.SurfaceView
+import android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+import android.widget.TextView
 
-const val LIFT_DOWN = 9
-const val LIFT_MOVE = 8
-const val LIFT_UP = 10
-const val RIGHT_UP = 18
-const val WHEEL_BUTTON_DOWN = 33
-const val WHEEL_BUTTON_UP = 34
-const val WHEEL_DOWN = 523331
-const val WHEEL_UP = 963
 
-const val TOUCH_SCALE_START = 1
-const val TOUCH_SCALE = 2
-const val TOUCH_SCALE_END = 3
-const val TOUCH_PAN_START = 4
-const val TOUCH_PAN_UPDATE = 5
-const val TOUCH_PAN_END = 6
-
-const val WHEEL_STEP = 120
-const val WHEEL_DURATION = 50L
-const val LONG_TAP_DELAY = 200L
-
-class InputService : AccessibilityService() {
-
-    companion object {
-        var ctx: InputService? = null
-        val isOpen: Boolean
-            get() = ctx != null
-    }
+class FloatingWindowService : Service(), View.OnTouchListener {
 
     private lateinit var windowManager: WindowManager
-    private lateinit var overlayView: View
+    private lateinit var layoutParams: WindowManager.LayoutParams
+    private lateinit var floatingView: ImageView
+    private lateinit var originalDrawable: Drawable
+    private lateinit var leftHalfDrawable: Drawable
+    private lateinit var rightHalfDrawable: Drawable
+    private var float_flag = true
+    private var blackViewAdded = false
+    private var firstBlack = true
+
+    private var dragging = false
+    private var lastDownX = 0f
+    private var lastDownY = 0f
+    private var viewCreated = false;
+    private var keepScreenOn = KeepScreenOn.DURING_CONTROLLED
+
+    private var overlayView: SurfaceView? = null
+    private var textView: TextView? = null
+
+    companion object {
+        private val logTag = "floatingService"
+        private var firstCreate = true
+        private var viewWidth = 120
+        private var viewHeight = 120
+        private const val MIN_VIEW_SIZE =
+            32 // size 0 does not help prevent the service from being killed
+        private const val MAX_VIEW_SIZE = 320
+        private var viewUntouchable = false
+        private var viewTransparency =
+            1f // 0 means invisible but can help prevent the service from being killed
+        private var customSvg = ""
+        private var lastLayoutX = 0
+        private var lastLayoutY = 0
+        private var lastOrientation = Configuration.ORIENTATION_UNDEFINED
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "CALL_ACCESSIBILITY_METHOD") {
-                // 调用 AccessibilityService 中的方法
-                val result = intent?.getBooleanExtra("showBlackScreen", false)
-                    ?.let { someMethodInAccessibilityService(it) }
-                // 发送结果回普通 Service
-                val replyIntent = Intent("ACCESSIBILITY_METHOD_RESULT").apply {
-                    putExtra("result", result)
-                }
-                sendBroadcast(replyIntent)
+            if (intent?.action == "ACCESSIBILITY_METHOD_RESULT") {
+                val result = intent.getStringExtra("result")
+                Log.d("MyNormalService", "Result: $result")
             }
         }
     }
 
-    private val logTag = "input service"
-    private var leftIsDown = false
-    private var touchPath = Path()
-    private var lastTouchGestureStartTime = 0L
-    private var mouseX = 0
-    private var mouseY = 0
-    private var timer = Timer()
-    private var recentActionTask: TimerTask? = null
-
-    private val wheelActionsQueue = LinkedList<GestureDescription>()
-    private var isWheelActionsPolling = false
-    private var isWaitingLongPress = false
-
-    private var fakeEditTextForTextStateCalculation: EditText? = null
-
-    private val volumeController: VolumeController by lazy { VolumeController(applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager) }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        val x = max(0, _x)
-        val y = max(0, _y)
-
-        if (mask == 0 || mask == LIFT_MOVE) {
-            val oldX = mouseX
-            val oldY = mouseY
-            mouseX = x * SCREEN_INFO.scale
-            mouseY = y * SCREEN_INFO.scale
-            if (isWaitingLongPress) {
-                val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
-                if (delta > 8) {
-                    isWaitingLongPress = false
-                }
-            }
-        }
-
-        // left button down ,was up
-        if (mask == LIFT_DOWN) {
-            isWaitingLongPress = true
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    if (isWaitingLongPress) {
-                        isWaitingLongPress = false
-                        leftIsDown = false
-                        endGesture(mouseX, mouseY)
-                    }
-                }
-            }, LONG_TAP_DELAY * 4)
-
-            leftIsDown = true
-            startGesture(mouseX, mouseY)
-            return
-        }
-
-        // left down ,was down
-        if (leftIsDown) {
-            continueGesture(mouseX, mouseY)
-        }
-
-        // left up ,was down
-        if (mask == LIFT_UP) {
-            if (leftIsDown) {
-                leftIsDown = false
-                isWaitingLongPress = false
-                endGesture(mouseX, mouseY)
-                return
-            }
-        }
-
-        if (mask == RIGHT_UP) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            return
-        }
-
-        // long WHEEL_BUTTON_DOWN -> GLOBAL_ACTION_RECENTS
-        if (mask == WHEEL_BUTTON_DOWN) {
-            timer.purge()
-            recentActionTask = object : TimerTask() {
-                override fun run() {
-                    performGlobalAction(GLOBAL_ACTION_RECENTS)
-                    recentActionTask = null
-                }
-            }
-            timer.schedule(recentActionTask, LONG_TAP_DELAY)
-        }
-
-        // wheel button up
-        if (mask == WHEEL_BUTTON_UP) {
-            if (recentActionTask != null) {
-                recentActionTask!!.cancel()
-                performGlobalAction(GLOBAL_ACTION_HOME)
-            }
-            return
-        }
-
-        if (mask == WHEEL_DOWN) {
-            if (mouseY < WHEEL_STEP) {
-                return
-            }
-            val path = Path()
-            path.moveTo(mouseX.toFloat(), mouseY.toFloat())
-            path.lineTo(mouseX.toFloat(), (mouseY - WHEEL_STEP).toFloat())
-            val stroke = GestureDescription.StrokeDescription(
-                path,
-                0,
-                WHEEL_DURATION
-            )
-            val builder = GestureDescription.Builder()
-            builder.addStroke(stroke)
-            wheelActionsQueue.offer(builder.build())
-            consumeWheelActions()
-
-        }
-
-        if (mask == WHEEL_UP) {
-            if (mouseY < WHEEL_STEP) {
-                return
-            }
-            val path = Path()
-            path.moveTo(mouseX.toFloat(), mouseY.toFloat())
-            path.lineTo(mouseX.toFloat(), (mouseY + WHEEL_STEP).toFloat())
-            val stroke = GestureDescription.StrokeDescription(
-                path,
-                0,
-                WHEEL_DURATION
-            )
-            val builder = GestureDescription.Builder()
-            builder.addStroke(stroke)
-            wheelActionsQueue.offer(builder.build())
-            consumeWheelActions()
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onTouchInput(mask: Int, _x: Int, _y: Int) {
-        when (mask) {
-            TOUCH_PAN_UPDATE -> {
-                mouseX -= _x * SCREEN_INFO.scale
-                mouseY -= _y * SCREEN_INFO.scale
-                mouseX = max(0, mouseX);
-                mouseY = max(0, mouseY);
-                continueGesture(mouseX, mouseY)
-            }
-            TOUCH_PAN_START -> {
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
-                startGesture(mouseX, mouseY)
-            }
-            TOUCH_PAN_END -> {
-                endGesture(mouseX, mouseY)
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
-            }
-            else -> {}
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun consumeWheelActions() {
-        if (isWheelActionsPolling) {
-            return
+    // 设置窗口参数
+    private val params = WindowManager.LayoutParams().apply {
+        width = WindowManager.LayoutParams.MATCH_PARENT
+        height = WindowManager.LayoutParams.MATCH_PARENT
+        type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
-            isWheelActionsPolling = true
+            WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
         }
-        wheelActionsQueue.poll()?.let {
-            dispatchGesture(it, null, null)
-            timer.purge()
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    isWheelActionsPolling = false
-                    consumeWheelActions()
-                }
-            }, WHEEL_DURATION + 10)
-        } ?: let {
-            isWheelActionsPolling = false
-            return
+        flags =
+            FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+        format = PixelFormat.TRANSPARENT // 半透明格式
+    }
+
+    private val params1 = WindowManager.LayoutParams().apply {
+        width = WindowManager.LayoutParams.WRAP_CONTENT
+        height = WindowManager.LayoutParams.WRAP_CONTENT
+        type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+        }
+        flags =
+            FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
+        format = PixelFormat.TRANSLUCENT
+    }
+
+
+    override fun onBind(intent: Intent): IBinder? {
+        return null
+    }
+
+    fun newAddBlackOverlay() {
+        if (!blackViewAdded) {
+            // 发送广播调用 AccessibilityService 中的方法
+            val intent = Intent("CALL_ACCESSIBILITY_METHOD")
+            intent.putExtra("showBlackScreen", true)
+            sendBroadcast(intent)
+            layoutParams.screenBrightness = 0.0f
+            windowManager.updateViewLayout(floatingView, layoutParams)
+            blackViewAdded = true
         }
     }
 
-    private fun startGesture(x: Int, y: Int) {
-        touchPath = Path()
-        touchPath.moveTo(x.toFloat(), y.toFloat())
-        lastTouchGestureStartTime = System.currentTimeMillis()
-    }
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    override fun onCreate() {
+        super.onCreate()
 
-    private fun continueGesture(x: Int, y: Int) {
-        touchPath.lineTo(x.toFloat(), y.toFloat())
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun endGesture(x: Int, y: Int) {
+        overlayView = SurfaceView(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         try {
-            touchPath.lineTo(x.toFloat(), y.toFloat())
-            var duration = System.currentTimeMillis() - lastTouchGestureStartTime
-            if (duration <= 0) {
-                duration = 1
+            if (firstCreate) {
+                firstCreate = false
+                onFirstCreate(windowManager)
             }
-            val stroke = GestureDescription.StrokeDescription(
-                touchPath,
-                0,
-                duration
+            Log.d(
+                logTag,
+                "floating window size: $viewWidth x $viewHeight, transparency: $viewTransparency, lastLayoutX: $lastLayoutX, lastLayoutY: $lastLayoutY, customSvg: $customSvg"
             )
-            val builder = GestureDescription.Builder()
-            builder.addStroke(stroke)
-            Log.d(logTag, "end gesture x:$x y:$y time:$duration")
-            dispatchGesture(builder.build(), null, null)
+            createView(windowManager)
+            handler.postDelayed(runnable, 1000)
+            Log.d(logTag, "onCreate success")
         } catch (e: Exception) {
-            Log.e(logTag, "endGesture error:$e")
+            Log.d(logTag, "onCreate failed: $e")
         }
+        // 注册广播接收器
+        val filter = IntentFilter("ACCESSIBILITY_METHOD_RESULT")
+        registerReceiver(receiver, filter)
+
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onKeyEvent(data: ByteArray) {
-        val keyEvent = KeyEvent.parseFrom(data)
-        val keyboardMode = keyEvent.getMode()
+    override fun onDestroy() {
+        super.onDestroy()
+        if (viewCreated) {
+            windowManager.removeView(floatingView)
+        }
+        // 注销广播接收器
+        unregisterReceiver(receiver)
+        handler.removeCallbacks(runnable)
+    }
 
-        var textToCommit: String? = null
-
-        if (keyboardMode == KeyboardMode.Legacy) {
-            if (keyEvent.hasChr() && keyEvent.getDown()) {
-                val chr = keyEvent.getChr()
-                if (chr != null) {
-                    textToCommit = String(Character.toChars(chr))
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createView(windowManager: WindowManager) {
+        floatingView = ImageView(this)
+        viewCreated = true
+        originalDrawable = resources.getDrawable(R.drawable.floating_window, null)
+        if (customSvg.isNotEmpty()) {
+            try {
+                val svg = SVG.getFromString(customSvg)
+                Log.d(logTag, "custom svg info: ${svg.documentWidth} x ${svg.documentHeight}");
+                // This make the svg render clear
+                svg.documentWidth = viewWidth * 1f
+                svg.documentHeight = viewHeight * 1f
+                originalDrawable = svg.renderToPicture().let {
+                    BitmapDrawable(
+                        resources,
+                        Bitmap.createBitmap(it.width, it.height, Bitmap.Config.ARGB_8888)
+                            .also { bitmap ->
+                                it.draw(Canvas(bitmap))
+                            })
                 }
-            }
-        } else if (keyboardMode == KeyboardMode.Translate) {
-            if (keyEvent.hasSeq() && keyEvent.getDown()) {
-                val seq = keyEvent.getSeq()
-                if (seq != null) {
-                    textToCommit = seq
-                }
+                floatingView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                Log.d(logTag, "custom svg loaded")
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
+        val originalBitmap = Bitmap.createBitmap(
+            originalDrawable.intrinsicWidth,
+            originalDrawable.intrinsicHeight,
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = Canvas(originalBitmap)
+        originalDrawable.setBounds(
+            0,
+            0,
+            originalDrawable.intrinsicWidth,
+            originalDrawable.intrinsicHeight
+        )
+        originalDrawable.draw(canvas)
+        val leftHalfBitmap = Bitmap.createBitmap(
+            originalBitmap,
+            0,
+            0,
+            originalDrawable.intrinsicWidth / 2,
+            originalDrawable.intrinsicHeight
+        )
+        val rightHalfBitmap = Bitmap.createBitmap(
+            originalBitmap,
+            originalDrawable.intrinsicWidth / 2,
+            0,
+            originalDrawable.intrinsicWidth / 2,
+            originalDrawable.intrinsicHeight
+        )
+        leftHalfDrawable = BitmapDrawable(resources, leftHalfBitmap)
+        rightHalfDrawable = BitmapDrawable(resources, rightHalfBitmap)
 
-        Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
+        floatingView.setImageDrawable(rightHalfDrawable)
+        floatingView.setOnTouchListener(this)
+//        floatingView.setOnLongClickListener {
+//            val isEnabled =
+//                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
+////            if (isEnabled) newAddBlackOverlay()
+//            newAddBlackOverlay()
+//            true
+//        }
+//        floatingView.setOnClickListener {
+//            val isEnabled =
+//                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
+////            if (isEnabled) hideOverView()
+//            hideOverView()
+////            newAddBlackOverlay()
+//        }
 
-        var ke: KeyEventAndroid? = null
-        if (Build.VERSION.SDK_INT < 33 || textToCommit == null) {
-            ke = KeyEventConverter.toAndroidKeyEvent(keyEvent)
+        floatingView.alpha = viewTransparency * 1f
+
+        var flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL or FLAG_NOT_FOCUSABLE
+        if (viewUntouchable || viewTransparency == 0f) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
-        ke?.let { event ->
-            if (tryHandleVolumeKeyEvent(event)) {
-                return
-            } else if (tryHandlePowerKeyEvent(event)) {
-                return
-            }
-        }
+        layoutParams = WindowManager.LayoutParams(
+            viewWidth / 2,
+            viewHeight,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            flags,
+            PixelFormat.TRANSLUCENT
+        )
 
-        if (Build.VERSION.SDK_INT >= 33) {
-            getInputMethod()?.let { inputMethod ->
-                inputMethod.getCurrentInputConnection()?.let { inputConnection ->
-                    if (textToCommit != null) {
-                        textToCommit?.let { text ->
-                            inputConnection.commitText(text, 1, null)
-                        }
-                    } else {
-                        ke?.let { event ->
-                            inputConnection.sendKeyEvent(event)
-                        }
+        layoutParams.gravity = Gravity.TOP or Gravity.START
+        layoutParams.x = lastLayoutX
+        layoutParams.y = lastLayoutY
+
+        val keepScreenOnOption = FFI.getLocalOption("keep-screen-on").lowercase()
+        keepScreenOn = when (keepScreenOnOption) {
+            "never" -> KeepScreenOn.NEVER
+            "service-on" -> KeepScreenOn.SERVICE_ON
+            else -> KeepScreenOn.DURING_CONTROLLED
+        }
+        Log.d(logTag, "keepScreenOn option: $keepScreenOnOption, value: $keepScreenOn")
+        updateKeepScreenOnLayoutParams()
+
+        windowManager.addView(floatingView, layoutParams)
+        moveToScreenSide()
+    }
+
+    private fun onFirstCreate(windowManager: WindowManager) {
+        val wh = getScreenSize(windowManager)
+        val w = wh.first
+        val h = wh.second
+        // size
+        FFI.getLocalOption("floating-window-size").let {
+            if (it.isNotEmpty()) {
+                try {
+                    val size = it.toInt()
+                    if (size in MIN_VIEW_SIZE..MAX_VIEW_SIZE && size <= w / 2 && size <= h / 2) {
+                        viewWidth = size
+                        viewHeight = size
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
+        }
+        // untouchable
+        viewUntouchable = FFI.getLocalOption("floating-window-untouchable") == "Y"
+        // transparency
+        FFI.getLocalOption("floating-window-transparency").let {
+            if (it.isNotEmpty()) {
+                try {
+                    val transparency = it.toInt()
+                    if (transparency in 0..10) {
+                        viewTransparency = transparency * 1f / 10
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+        // custom svg
+        FFI.getLocalOption("floating-window-svg").let {
+            if (it.isNotEmpty()) {
+                customSvg = it
+            }
+        }
+        // position
+        lastLayoutX = 0
+        lastLayoutY = (wh.second - viewHeight) / 2
+        lastOrientation = resources.configuration.orientation
+    }
+
+    private fun performClick() {
+        showPopupMenu()
+//        hideOverView()
+    }
+
+    override fun onTouch(view: View?, event: MotionEvent?): Boolean {
+        when (event?.action) {
+            MotionEvent.ACTION_DOWN -> {
+                dragging = false
+                lastDownX = event.rawX
+                lastDownY = event.rawY
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val clickDragTolerance = 10f
+
+                if (abs(event.rawX - lastDownX) < clickDragTolerance && abs(event.rawY - lastDownY) < clickDragTolerance) {
+                    performClick()
+                } else {
+                    moveToScreenSide()
+                    hideOverView()
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - lastDownX
+                val dy = event.rawY - lastDownY
+                // ignore too small fist start moving(some time is click)
+                if (!dragging && dx * dx + dy * dy < 25) {
+                    return false
+                }
+                dragging = true
+                layoutParams.x = event.rawX.toInt()
+                layoutParams.y = event.rawY.toInt()
+                layoutParams.width = viewWidth
+                floatingView.setImageDrawable(originalDrawable)
+                windowManager.updateViewLayout(view, layoutParams)
+                lastLayoutX = layoutParams.x
+                lastLayoutY = layoutParams.y
+            }
+        }
+        return false
+    }
+
+    private fun moveToScreenSide(center: Boolean = false) {
+        val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        val wh = getScreenSize(windowManager)
+        val w = wh.first
+        if (layoutParams.x < w / 2) {
+            layoutParams.x = 0
+            floatingView.setImageDrawable(rightHalfDrawable)
         } else {
-            val handler = Handler(Looper.getMainLooper())
-            handler.post {
-                ke?.let { event ->
-                    val possibleNodes = possibleAccessibiltyNodes()
-                    Log.d(logTag, "possibleNodes:$possibleNodes")
-                    for (item in possibleNodes) {
-                        val success = trySendKeyEvent(event, item, textToCommit)
-                        if (success) {
-                            break
-                        }
-                    }
-                }
+            layoutParams.x = w - viewWidth / 2
+            floatingView.setImageDrawable(leftHalfDrawable)
+        }
+        if (center) {
+            layoutParams.y = (wh.second - viewHeight) / 2
+        }
+        layoutParams.width = viewWidth / 2
+        windowManager.updateViewLayout(floatingView, layoutParams)
+        lastLayoutX = layoutParams.x
+        lastLayoutY = layoutParams.y
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (newConfig.orientation != lastOrientation) {
+            lastOrientation = newConfig.orientation
+            val wh = getScreenSize(windowManager)
+            Log.d(logTag, "orientation: $lastOrientation, screen size: ${wh.first} x ${wh.second}")
+            val newW = wh.first
+            val newH = wh.second
+            if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE || newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // Proportional change
+                layoutParams.x =
+                    (layoutParams.x.toFloat() / newH.toFloat() * newW.toFloat()).toInt()
+                layoutParams.y =
+                    (layoutParams.y.toFloat() / newW.toFloat() * newH.toFloat()).toInt()
             }
+            moveToScreenSide()
         }
     }
 
-    private fun tryHandleVolumeKeyEvent(event: KeyEventAndroid): Boolean {
-        when (event.keyCode) {
-            KeyEventAndroid.KEYCODE_VOLUME_UP -> {
-                if (event.action == KeyEventAndroid.ACTION_DOWN) {
-                    volumeController.raiseVolume(null, true, AudioManager.STREAM_SYSTEM)
+    private fun showPopupMenu() {
+        val popupMenu = PopupMenu(this, floatingView)
+        val idShowRustDesk = 0
+        popupMenu.menu.add(0, idShowRustDesk, 0, "mode1")
+        val idStopService = 1
+        popupMenu.menu.add(0, idStopService, 0, "mode2")
+        val idShowBlack = 2
+        popupMenu.menu.add(0, 2, idShowBlack, "mode3")
+        val idCloseBlack = 3
+        popupMenu.menu.add(0, 3, idCloseBlack, "mode4")
+        popupMenu.setOnMenuItemClickListener { menuItem ->
+            when (menuItem.itemId) {
+                idShowRustDesk -> {
+//                     openMainActivity()
+                    newAddBlackOverlay()
+                    true
                 }
-                return true
-            }
-            KeyEventAndroid.KEYCODE_VOLUME_DOWN -> {
-                if (event.action == KeyEventAndroid.ACTION_DOWN) {
-                    volumeController.lowerVolume(null, true, AudioManager.STREAM_SYSTEM)
+
+                idStopService -> {
+//                     stopMainService()
+                    hideOverView()
+                    true
                 }
-                return true
-            }
-            KeyEventAndroid.KEYCODE_VOLUME_MUTE -> {
-                if (event.action == KeyEventAndroid.ACTION_DOWN) {
-                    volumeController.toggleMute(true, AudioManager.STREAM_SYSTEM)
+
+                idShowBlack -> {
+                    showBlack()
+                    true
                 }
-                return true
+
+                idCloseBlack -> {
+                    hideBlack()
+                    true
+                }
+
+                else -> false
             }
-            else -> {
-                return false
+        }
+        popupMenu.setOnDismissListener {
+            moveToScreenSide()
+        }
+        popupMenu.show()
+    }
+
+    private fun showBlack() {
+        // 创建透明覆盖层
+        overlayView = SurfaceView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = 0.8f // 透明度设置
+        }
+        overlayView?.setZOrderOnTop(true)
+
+        // 设置窗口参数
+        val params = WindowManager.LayoutParams().apply {
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
+            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
             }
+            flags =
+                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+            format = PixelFormat.TRANSPARENT // 半透明格式
+        }
+        params.screenBrightness = 0.0f
+        windowManager?.addView(overlayView, params)
+    }
+
+    private fun hideBlack() {
+        overlayView?.let {
+            windowManager.removeView(it)
         }
     }
 
-    private fun tryHandlePowerKeyEvent(event: KeyEventAndroid): Boolean {
-        if (event.keyCode == KeyEventAndroid.KEYCODE_POWER) {
-            // Perform power dialog action when action is up
-            if (event.action == KeyEventAndroid.ACTION_UP) {
-                performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
+    private fun isAccessibilityServiceEnabled(context: Context, serviceName: String): Boolean {
+        val accessibilityManager =
+            context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(
+            AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+        )
+
+        return enabledServices.any { it.id == serviceName }
+    }
+
+    private fun hideOverView() {
+        if (blackViewAdded) {
+            val intent = Intent("CALL_ACCESSIBILITY_METHOD")
+            intent.putExtra("showBlackScreen", false)
+            sendBroadcast(intent)
+            layoutParams.screenBrightness = 0.1f
+            windowManager.updateViewLayout(floatingView, layoutParams)
+            blackViewAdded = false
+        }
+    }
+
+    private fun openMainActivity() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT
+        )
+        try {
+            pendingIntent.send()
+        } catch (e: PendingIntent.CanceledException) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun stopMainService() {
+        MainActivity.flutterMethodChannel?.invokeMethod("stop_service", null)
+    }
+
+    enum class KeepScreenOn {
+        NEVER,
+        DURING_CONTROLLED,
+        SERVICE_ON,
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val runnable = object : Runnable {
+        override fun run() {
+            if (updateKeepScreenOnLayoutParams()) {
+                windowManager.updateViewLayout(floatingView, layoutParams)
+            }
+            handler.postDelayed(this, 1000) // 1000 milliseconds = 1 second
+        }
+    }
+
+    private fun updateKeepScreenOnLayoutParams(): Boolean {
+        val oldOn = layoutParams.flags and FLAG_KEEP_SCREEN_ON != 0
+        val newOn =
+            keepScreenOn == KeepScreenOn.SERVICE_ON || (keepScreenOn == KeepScreenOn.DURING_CONTROLLED && MainService.isStart)
+        if (oldOn != newOn) {
+            Log.d(logTag, "change keep screen on to $newOn")
+            if (newOn) {
+                layoutParams.flags = layoutParams.flags or FLAG_KEEP_SCREEN_ON
+            } else {
+                layoutParams.flags = layoutParams.flags and FLAG_KEEP_SCREEN_ON.inv()
             }
             return true
         }
         return false
     }
-
-    private fun insertAccessibilityNode(list: LinkedList<AccessibilityNodeInfo>, node: AccessibilityNodeInfo) {
-        if (node == null) {
-            return
-        }
-        if (list.contains(node)) {
-            return
-        }
-        list.add(node)
-    }
-
-    private fun findChildNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (node == null) {
-            return null
-        }
-        if (node.isEditable() && node.isFocusable()) {
-            return node
-        }
-        val childCount = node.getChildCount()
-        for (i in 0 until childCount) {
-            val child = node.getChild(i)
-            if (child != null) {
-                if (child.isEditable() && child.isFocusable()) {
-                    return child
-                }
-                if (Build.VERSION.SDK_INT < 33) {
-                    child.recycle()
-                }
-            }
-        }
-        for (i in 0 until childCount) {
-            val child = node.getChild(i)
-            if (child != null) {
-                val result = findChildNode(child)
-                if (Build.VERSION.SDK_INT < 33) {
-                    if (child != result) {
-                        child.recycle()
-                    }
-                }
-                if (result != null) {
-                    return result
-                }
-            }
-        }
-        return null
-    }
-
-    private fun possibleAccessibiltyNodes(): LinkedList<AccessibilityNodeInfo> {
-        val linkedList = LinkedList<AccessibilityNodeInfo>()
-        val latestList = LinkedList<AccessibilityNodeInfo>()
-
-        val focusInput = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        var focusAccessibilityInput = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-
-        val rootInActiveWindow = getRootInActiveWindow()
-
-        Log.d(logTag, "focusInput:$focusInput focusAccessibilityInput:$focusAccessibilityInput rootInActiveWindow:$rootInActiveWindow")
-
-        if (focusInput != null) {
-            if (focusInput.isFocusable() && focusInput.isEditable()) {
-                insertAccessibilityNode(linkedList, focusInput)
-            } else {
-                insertAccessibilityNode(latestList, focusInput)
-            }
-        }
-
-        if (focusAccessibilityInput != null) {
-            if (focusAccessibilityInput.isFocusable() && focusAccessibilityInput.isEditable()) {
-                insertAccessibilityNode(linkedList, focusAccessibilityInput)
-            } else {
-                insertAccessibilityNode(latestList, focusAccessibilityInput)
-            }
-        }
-
-        val childFromFocusInput = findChildNode(focusInput)
-        Log.d(logTag, "childFromFocusInput:$childFromFocusInput")
-
-        if (childFromFocusInput != null) {
-            insertAccessibilityNode(linkedList, childFromFocusInput)
-        }
-
-        val childFromFocusAccessibilityInput = findChildNode(focusAccessibilityInput)
-        if (childFromFocusAccessibilityInput != null) {
-            insertAccessibilityNode(linkedList, childFromFocusAccessibilityInput)
-        }
-        Log.d(logTag, "childFromFocusAccessibilityInput:$childFromFocusAccessibilityInput")
-
-        if (rootInActiveWindow != null) {
-            insertAccessibilityNode(linkedList, rootInActiveWindow)
-        }
-
-        for (item in latestList) {
-            insertAccessibilityNode(linkedList, item)
-        }
-
-        return linkedList
-    }
-
-    private fun trySendKeyEvent(event: KeyEventAndroid, node: AccessibilityNodeInfo, textToCommit: String?): Boolean {
-        node.refresh()
-        this.fakeEditTextForTextStateCalculation?.setSelection(0,0)
-        this.fakeEditTextForTextStateCalculation?.setText(null)
-
-        val text = node.getText()
-        var isShowingHint = false
-        if (Build.VERSION.SDK_INT >= 26) {
-            isShowingHint = node.isShowingHintText()
-        }
-
-        var textSelectionStart = node.textSelectionStart
-        var textSelectionEnd = node.textSelectionEnd
-
-        if (text != null) {
-            if (textSelectionStart > text.length) {
-                textSelectionStart = text.length
-            }
-            if (textSelectionEnd > text.length) {
-                textSelectionEnd = text.length
-            }
-            if (textSelectionStart > textSelectionEnd) {
-                textSelectionStart = textSelectionEnd
-            }
-        }
-
-        var success = false
-
-        Log.d(logTag, "existing text:$text textToCommit:$textToCommit textSelectionStart:$textSelectionStart textSelectionEnd:$textSelectionEnd")
-
-        if (textToCommit != null) {
-            if ((textSelectionStart == -1) || (textSelectionEnd == -1)) {
-                val newText = textToCommit
-                this.fakeEditTextForTextStateCalculation?.setText(newText)
-                success = updateTextForAccessibilityNode(node)
-            } else if (text != null) {
-                this.fakeEditTextForTextStateCalculation?.setText(text)
-                this.fakeEditTextForTextStateCalculation?.setSelection(
-                    textSelectionStart,
-                    textSelectionEnd
-                )
-                this.fakeEditTextForTextStateCalculation?.text?.insert(textSelectionStart, textToCommit)
-                success = updateTextAndSelectionForAccessibiltyNode(node)
-            }
-        } else {
-            if (isShowingHint) {
-                this.fakeEditTextForTextStateCalculation?.setText(null)
-            } else {
-                this.fakeEditTextForTextStateCalculation?.setText(text)
-            }
-            if (textSelectionStart != -1 && textSelectionEnd != -1) {
-                Log.d(logTag, "setting selection $textSelectionStart $textSelectionEnd")
-                this.fakeEditTextForTextStateCalculation?.setSelection(
-                    textSelectionStart,
-                    textSelectionEnd
-                )
-            }
-
-            this.fakeEditTextForTextStateCalculation?.let {
-                // This is essiential to make sure layout object is created. OnKeyDown may not work if layout is not created.
-                val rect = Rect()
-                node.getBoundsInScreen(rect)
-
-                it.layout(rect.left, rect.top, rect.right, rect.bottom)
-                it.onPreDraw()
-                if (event.action == KeyEventAndroid.ACTION_DOWN) {
-                    val succ = it.onKeyDown(event.getKeyCode(), event)
-                    Log.d(logTag, "onKeyDown $succ")
-                } else if (event.action == KeyEventAndroid.ACTION_UP) {
-                    val success = it.onKeyUp(event.getKeyCode(), event)
-                    Log.d(logTag, "keyup $success")
-                } else {}
-            }
-
-            success = updateTextAndSelectionForAccessibiltyNode(node)
-        }
-        return success
-    }
-
-    fun updateTextForAccessibilityNode(node: AccessibilityNodeInfo): Boolean {
-        var success = false
-        this.fakeEditTextForTextStateCalculation?.text?.let {
-            val arguments = Bundle()
-            arguments.putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                it.toString()
-            )
-            success = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        }
-        return success
-    }
-
-    fun updateTextAndSelectionForAccessibiltyNode(node: AccessibilityNodeInfo): Boolean {
-        var success = updateTextForAccessibilityNode(node)
-
-        if (success) {
-            val selectionStart = this.fakeEditTextForTextStateCalculation?.selectionStart
-            val selectionEnd = this.fakeEditTextForTextStateCalculation?.selectionEnd
-
-            if (selectionStart != null && selectionEnd != null) {
-                val arguments = Bundle()
-                arguments.putInt(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT,
-                    selectionStart
-                )
-                arguments.putInt(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                    selectionEnd
-                )
-                success = node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, arguments)
-                Log.d(logTag, "Update selection to $selectionStart $selectionEnd success:$success")
-            }
-        }
-
-        return success
-    }
-
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent) {
-    }
-
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        ctx = this
-        val info = AccessibilityServiceInfo()
-        if (Build.VERSION.SDK_INT >= 33) {
-            info.flags = FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        } else {
-            info.flags = FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        }
-        setServiceInfo(info)
-        fakeEditTextForTextStateCalculation = EditText(this)
-        // Size here doesn't matter, we won't show this view.
-        fakeEditTextForTextStateCalculation?.layoutParams = LayoutParams(100, 100)
-        fakeEditTextForTextStateCalculation?.onPreDraw()
-        val layout = fakeEditTextForTextStateCalculation?.getLayout()
-        Log.d(logTag, "fakeEditTextForTextStateCalculation layout:$layout")
-        Log.d(logTag, "onServiceConnected!")
-
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        overlayView = LayoutInflater.from(this).inflate(R.layout.float_layer, null)
-        // 注册广播接收器
-        val filter = IntentFilter("CALL_ACCESSIBILITY_METHOD")
-        registerReceiver(receiver, filter)
-    }
-
-    private fun someMethodInAccessibilityService(showBlackScreen: Boolean): String {
-        if (showBlackScreen)
-            initOverlay()
-        else overlayView?.let { windowManager.removeView(it) }
-        return "true"
-    }
-
-    fun initOverlay() {
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, // 使用无障碍悬浮窗类型
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-            android.graphics.PixelFormat.TRANSLUCENT
-        )
-        params.screenBrightness = 0.0f
-
-        // 添加悬浮窗到桌面
-        windowManager.addView(overlayView, params)
-        overlayView.bringToFront()
-    }
-
-    override fun onDestroy() {
-        ctx = null
-        super.onDestroy()
-    }
-
-    override fun onInterrupt() {}
 }
+
