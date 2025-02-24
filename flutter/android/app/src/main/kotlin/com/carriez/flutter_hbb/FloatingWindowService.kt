@@ -64,7 +64,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     private var viewCreated = false;
     private var keepScreenOn = KeepScreenOn.DURING_CONTROLLED
 
-    private var blackOverlay: SurfaceView? = null
+    private var overlayView: SurfaceView? = null
     private var textView: TextView? = null
 
     companion object {
@@ -141,7 +141,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     override fun onCreate() {
         super.onCreate()
 
-        blackOverlay = SurfaceView(this).apply {
+        overlayView = SurfaceView(this).apply {
             setBackgroundColor(Color.BLACK)
         }
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -174,12 +174,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         // 注销广播接收器
         unregisterReceiver(receiver)
         handler.removeCallbacks(runnable)
-    }
-
-    private fun blackScreen() {
-//        newAddBlackOverlay()
-//        layoutParams.screenBrightness = 0.0f
-//        windowManager.updateViewLayout(floatingView, layoutParams)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -420,6 +414,10 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         popupMenu.menu.add(0, idShowRustDesk, 0, "mode1")
         val idStopService = 1
         popupMenu.menu.add(0, idStopService, 0, "mode2")
+        val idShowBlack = 2
+        popupMenu.menu.add(0, 2, idShowBlack, "mode3")
+        val idCloseBlack = 3
+        popupMenu.menu.add(0, 3, idCloseBlack, "mode4")
         popupMenu.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
                 idShowRustDesk -> {
@@ -434,6 +432,16 @@ class FloatingWindowService : Service(), View.OnTouchListener {
                     true
                 }
 
+                idShowBlack -> {
+                    showBlack()
+                    true
+                }
+
+                idCloseBlack -> {
+                    hideBlack()
+                    true
+                }
+
                 else -> false
             }
         }
@@ -441,6 +449,37 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             moveToScreenSide()
         }
         popupMenu.show()
+    }
+
+    private fun showBlack() {
+        // 创建透明覆盖层
+        overlayView = SurfaceView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = 0.8f // 透明度设置
+        }
+        overlayView?.setZOrderOnTop(true)
+
+        // 设置窗口参数
+        val params = WindowManager.LayoutParams().apply {
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
+            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+            }
+            flags =
+                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+            format = PixelFormat.TRANSPARENT // 半透明格式
+        }
+        params.screenBrightness = 0.0f
+        windowManager?.addView(overlayView, params)
+    }
+
+    private fun hideBlack() {
+        overlayView?.let {
+            windowManager.removeView(it)
+        }
     }
 
     private fun isAccessibilityServiceEnabled(context: Context, serviceName: String): Boolean {
