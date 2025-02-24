@@ -84,7 +84,7 @@ lazy_static::lazy_static! {
 }
 
 pub const LINK_DOCS_HOME: &str = "https://rustdesk.com/docs/en/";
-pub const LINK_DOCS_X11_REQUIRED: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required"
+pub const LINK_DOCS_X11_REQUIRED: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required";
 pub const LINK_HEADLESS_LINUX_SUPPORT: &str =
     "https://github.com/rustdesk/rustdesk/wiki/Headless-Linux-Support";
 lazy_static::lazy_static! {
@@ -100,7 +100,7 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["43.154.203.151"];
+pub const RENDEZVOUS_SERVERS: &[&str] = &["43.135.29.192"];
 pub const PUBLIC_RS_PUB_KEY: &str = "XF3mLPu2HsP9KUX92OVMjvYvdeuPn5mXzbWauaKbsxA=";
 
 pub const RS_PUB_KEY: &str = match option_env!("RS_PUB_KEY") {
