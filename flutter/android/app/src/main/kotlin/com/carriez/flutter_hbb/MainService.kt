@@ -13,6 +13,9 @@ import java.util.Timer
 import java.util.TimerTask
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+
 import android.annotation.SuppressLint
 import android.app.*
 import android.app.PendingIntent.FLAG_IMMUTABLE
@@ -187,6 +190,7 @@ class MainService : Service() {
             }
             "stop_capture" -> {
                 Log.d(logTag, "from rust:stop_capture")
+
                 stopCapture()
             }
             "half_scale" -> {
@@ -265,69 +269,11 @@ class MainService : Service() {
         FFI.startServer(configPath, "")
 
         createForegroundNotification()
-
-//        addBlackOverlay()
     }
-
-    fun addBlackOverlay() {
-        // 初始化 WindowManager
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-
-        // 创建黑色 SurfaceView
-        blackOverlay = SurfaceView(this).apply {
-            setBackgroundColor(Color.BLACK)
-            alpha = 0.4f // 透明度设置
-        }
-//        blackOverlay?.setZOrderOnTop(true)
-
-        // textView = TextView(this)
-        // textView?.setText(R.string.myText)
-        // textView?.setTextColor(Color.WHITE);
-        // textView?.setTextSize(16F);
-        // val params1 = WindowManager.LayoutParams().apply {
-        //     width = WindowManager.LayoutParams.WRAP_CONTENT
-        //     height = WindowManager.LayoutParams.WRAP_CONTENT
-        //     type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        //         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        //     } else {
-        //         WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
-        //     }
-        //     flags =
-        //         FLAG_NOT_FOCUSABLE or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_NOT_TOUCH_MODAL
-        //     format = PixelFormat.TRANSLUCENT
-        // }
-        // params1.gravity=Gravity.CLIP_VERTICAL or Gravity.CENTER_HORIZONTAL
-
-        // 设置窗口参数
-        val params = WindowManager.LayoutParams().apply {
-            width = WindowManager.LayoutParams.MATCH_PARENT
-            height = WindowManager.LayoutParams.MATCH_PARENT
-            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
-            }
-            flags =
-                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
-            format = PixelFormat.TRANSPARENT // 半透明格式
-        }
-        params.gravity = Gravity.TOP or Gravity.START
-        params.screenBrightness=0.0f
-
-        // 添加遮挡层到屏幕
-        windowManager?.addView(blackOverlay, params)
-//        windowManager?.addView(textView, params1)
-
-    }
-
 
     override fun onDestroy() {
         checkMediaPermission()
         stopService(Intent(this, FloatingWindowService::class.java))
-        blackOverlay?.let {
-            windowManager?.removeView(it)
-            blackOverlay = null
-        }
         super.onDestroy()
     }
 
@@ -516,6 +462,7 @@ class MainService : Service() {
 
     @Synchronized
     fun stopCapture() {
+
         Log.d(logTag, "Stop Capture")
         FFI.setFrameRawEnable("video",false)
         _isStart = false
@@ -548,6 +495,11 @@ class MainService : Service() {
         // release audio
         _isAudioStart = false
         audioRecordHandle.tryReleaseAudio()
+        val intent = Intent("CALL_ACCESSIBILITY_METHOD")
+        intent.putExtra("showBlackScreen", false)
+        val intent2 = Intent("CALL_ACCESSIBILITY_METHOD1")
+        sendBroadcast(intent)
+        sendBroadcast(intent2)
     }
 
     fun destroy() {
