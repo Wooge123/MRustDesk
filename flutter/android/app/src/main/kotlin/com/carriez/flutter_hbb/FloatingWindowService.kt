@@ -56,6 +56,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     private lateinit var rightHalfDrawable: Drawable
     private var float_flag = true
     private var blackViewAdded = false
+    private var blackScreenAdded = false
     private var firstBlack = true
 
     private var dragging = false
@@ -86,9 +87,13 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "ACCESSIBILITY_METHOD_RESULT") {
-                val result = intent.getStringExtra("result")
-                Log.d("MyNormalService", "Result: $result")
+            if (intent?.action == "CALL_ACCESSIBILITY_METHOD1") {
+                layoutParams.screenBrightness = 0.1f
+                windowManager.updateViewLayout(floatingView, layoutParams)
+                blackViewAdded = false
+                hideBlack()
+//                val result = intent.getStringExtra("result")
+//                Log.d("MyNormalService", "Result: $result")
             }
         }
     }
@@ -161,7 +166,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             Log.d(logTag, "onCreate failed: $e")
         }
         // 注册广播接收器
-        val filter = IntentFilter("ACCESSIBILITY_METHOD_RESULT")
+        val filter = IntentFilter("CALL_ACCESSIBILITY_METHOD1")
         registerReceiver(receiver, filter)
 
     }
@@ -245,7 +250,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 //            val isEnabled =
 //                isAccessibilityServiceEnabled(this, "com.carriez.flutter_hbb/.InputService")
 ////            if (isEnabled) hideOverView()
-//            hideOverView()
 ////            newAddBlackOverlay()
 //        }
 
@@ -327,7 +331,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
 
     private fun performClick() {
         showPopupMenu()
-//        hideOverView()
     }
 
     override fun onTouch(view: View?, event: MotionEvent?): Boolean {
@@ -345,7 +348,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
                     performClick()
                 } else {
                     moveToScreenSide()
-                    hideOverView()
                 }
             }
 
@@ -452,33 +454,39 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     }
 
     private fun showBlack() {
-        // 创建透明覆盖层
-        overlayView = SurfaceView(this).apply {
-            setBackgroundColor(Color.BLACK)
-            alpha = 0.8f // 透明度设置
-        }
-        overlayView?.setZOrderOnTop(true)
-
-        // 设置窗口参数
-        val params = WindowManager.LayoutParams().apply {
-            width = WindowManager.LayoutParams.MATCH_PARENT
-            height = WindowManager.LayoutParams.MATCH_PARENT
-            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+        if (!blackScreenAdded) {
+            // 创建透明覆盖层
+            overlayView = SurfaceView(this).apply {
+                setBackgroundColor(Color.BLACK)
+                alpha = 0.8f // 透明度设置
             }
-            flags =
-                FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
-            format = PixelFormat.TRANSPARENT // 半透明格式
+            overlayView?.setZOrderOnTop(true)
+
+            // 设置窗口参数
+            val params = WindowManager.LayoutParams().apply {
+                width = WindowManager.LayoutParams.MATCH_PARENT
+                height = WindowManager.LayoutParams.MATCH_PARENT
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+                }
+                flags =
+                    FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCHABLE
+                format = PixelFormat.TRANSPARENT // 半透明格式
+            }
+            params.screenBrightness = 0.0f
+            windowManager?.addView(overlayView, params)
+            blackScreenAdded = true
         }
-        params.screenBrightness = 0.0f
-        windowManager?.addView(overlayView, params)
     }
 
     private fun hideBlack() {
-        overlayView?.let {
-            windowManager.removeView(it)
+        if (blackScreenAdded) {
+            overlayView?.let {
+                windowManager.removeView(it)
+            }
+            blackScreenAdded = false
         }
     }
 
