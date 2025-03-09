@@ -2194,7 +2194,7 @@ pub mod keys {
     pub const OPTION_ENABLE_HWCODEC: &str = "enable-hwcodec";
     pub const OPTION_APPROVE_MODE: &str = "approve-mode";
     pub const OPTION_CUSTOM_RENDEZVOUS_SERVER: &str = "custom-rendezvous-server";
-    pub const OPTION_API_SERVER: &str = "http://rdk.vnddns.work:21114";
+    pub const OPTION_API_SERVER: &str = "api-server";
     pub const OPTION_KEY: &str = "key";
     pub const OPTION_PRESET_ADDRESS_BOOK_NAME: &str = "preset-address-book-name";
     pub const OPTION_PRESET_ADDRESS_BOOK_TAG: &str = "preset-address-book-tag";
