@@ -31,7 +31,7 @@ jobs:
           sudo apt-get install ca-certificates -y
           sudo apt-get update -y
           wget http://ftp.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-10/libclang-10-dev_10.0.0-4ubuntu1_amd64.deb
-          sudo dpkg -i libclang-10-dev_10.0.0-4ubuntu1_amd64.deb -y
+          sudo dpkg -i libclang-10-dev_10.0.0-4ubuntu1_amd64.deb
           sudo apt-get install -y \
             clang \
             cmake \
