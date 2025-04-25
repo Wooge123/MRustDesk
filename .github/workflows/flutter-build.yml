@@ -112,7 +112,7 @@ jobs:
                libxcb-xfixes0-dev \
                libxdo-dev \
                libxfixes-dev \
-               llvm-14-dev \
+               llvm-10-dev \
                nasm \
                ninja-build \
                openjdk-11-jdk-headless \
