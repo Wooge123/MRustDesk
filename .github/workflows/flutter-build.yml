@@ -118,7 +118,7 @@ jobs:
                nasm \
                ninja-build \
                openjdk-11-jdk-headless \
-               pkg-config \
+               pkg-config=2.2.0 \
                tree \
                wget
 
